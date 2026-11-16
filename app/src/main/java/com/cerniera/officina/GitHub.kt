@@ -35,12 +35,25 @@ object GitHub {
 
     class Limited(val resetAt: Long) : Exception("GitHub's hourly limit is reached")
 
+    /** While GitHub's hourly limit is spent, the time it resets; every read is answered from what was kept. */
+    @Volatile var limitedUntil = 0L
+    val limited get() = System.currentTimeMillis() < limitedUntil
+
+    /** Reads only what was kept, asking GitHub nothing (for apps unchanged since they were last read). */
+    private val keptOnly = ThreadLocal<Boolean>()
+    fun <T> kept(block: () -> T): T { keptOnly.set(true); try { return block() } finally { keptOnly.set(false) } }
+
     private fun cacheFile(c: Context, path: String) = File(File(c.cacheDir, "gh").apply { mkdirs() }, path.hashCode().toUInt().toString(16))
 
     /** A GET, with the ETag cache. Returns null on 404. */
     fun get(c: Context, path: String): String? {
         val cache = cacheFile(c, path)
         val tagFile = File(cache.path + ".etag")
+        // Nothing asked of GitHub while the limit is spent, or for an app that hasn't changed
+        if (limited || keptOnly.get() == true) {
+            if (cache.exists()) return cache.readText()
+            if (limited) throw Limited(limitedUntil)
+        }
         val conn = (URL(API + path).openConnection() as HttpURLConnection).apply {
             connectTimeout = 12_000; readTimeout = 20_000
             setRequestProperty("Accept", "application/vnd.github+json")
@@ -59,7 +72,12 @@ object GitHub {
                 404 -> null
                 403, 429 -> {
                     val left = conn.getHeaderField("X-RateLimit-Remaining")?.toIntOrNull()
-                    if (left == 0) throw Limited((conn.getHeaderField("X-RateLimit-Reset")?.toLongOrNull() ?: 0L) * 1000)
+                    if (left == 0) {
+                        limitedUntil = (conn.getHeaderField("X-RateLimit-Reset")?.toLongOrNull() ?: 0L) * 1000
+                        // The rest of this refresh, and any before the reset, reads what was kept
+                        if (cache.exists()) return cache.readText()
+                        throw Limited(limitedUntil)
+                    }
                     // Over the limit before: the last answer still serves
                     if (cache.exists()) cache.readText() else throw java.io.IOException("GitHub answered $code")
                 }
@@ -69,11 +87,14 @@ object GitHub {
     }
 
     /** The studio's public repos, newest push first. */
-    fun repos(c: Context): List<Pair<String, Boolean>> {
+    data class Repo(val name: String, val archived: Boolean, val pushed: Long)
+
+    /** The studio's public repos, newest push first. One request answers for every app. */
+    fun repos(c: Context): List<Repo> {
         val a = JSONArray(get(c, "/orgs/$ORG/repos?per_page=100&type=public") ?: "[]")
         return (0 until a.length()).map { a.getJSONObject(it) }
-            .sortedByDescending { it.optString("pushed_at") }
-            .map { it.getString("name") to it.optBoolean("archived") }
+            .map { Repo(it.getString("name"), it.optBoolean("archived"), time(it.optString("pushed_at"))) }
+            .sortedByDescending { it.pushed }
     }
 
     fun releases(c: Context, repo: String): List<Release> {

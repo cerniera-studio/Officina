@@ -87,18 +87,32 @@ class MainActivity : Activity() {
         io.execute {
             val result = runCatching {
                 val retired = RETIRED
-                GitHub.repos(this).filter { (name, archived) -> !archived && name !in NOT_APPS }.map { (name, _) ->
+                val known = benches.associateBy { it.repo }
+                // One request lists every repo with its last push. Only apps pushed to since they were
+                // last read, or whose run was still going, are asked about again; the rest come from
+                // what was kept. A quiet refresh costs one request instead of thirty-odd.
+                GitHub.repos(this).filter { !it.archived && it.name !in NOT_APPS }.map { r ->
                     io.submit<Bench?> {
-                        val releases = GitHub.releases(this, name)
-                        if (releases.isEmpty()) return@submit null
-                        Bench(name, title(name), GitHub.appId(this, name), releases, runCatching { GitHub.latestRun(this, name) }.getOrNull(),
-                            runCatching { GitHub.checks(this, name) }.getOrNull(), name.lowercase() in retired)
+                        val name = r.name
+                        val fresh = Read.needed(this, name, r.pushed, known[name]?.run)
+                        val read = {
+                            val releases = GitHub.releases(this, name)
+                            if (releases.isEmpty()) null
+                            else Bench(name, title(name), GitHub.appId(this, name), releases, runCatching { GitHub.latestRun(this, name) }.getOrNull(),
+                                runCatching { GitHub.checks(this, name) }.getOrNull(), name.lowercase() in retired)
+                        }
+                        // One app failing to read keeps what was last known of it, never sinks the rest
+                        runCatching {
+                            val b = if (fresh) read() else GitHub.kept(read)
+                            if (fresh && !GitHub.limited) Read.done(this, name, r.pushed)
+                            b
+                        }.getOrElse { known[name] }
                     }
                 }.mapNotNull { it.get() }.sortedByDescending { it.newest?.published ?: 0L }
             }
             runOnUiThread {
                 loading = false
-                result.onSuccess { benches = it; error = null; loadedAt = System.currentTimeMillis() }
+                result.onSuccess { benches = it; error = null; if (!GitHub.limited) loadedAt = System.currentTimeMillis() }
                     .onFailure { e -> error = if (e is GitHub.Limited || e.cause is GitHub.Limited) limitWords((e as? GitHub.Limited ?: e.cause as GitHub.Limited).resetAt) else (e.message ?: "Couldn't reach GitHub") }
                 if (!isDestroyed) render()
             }
@@ -120,14 +134,19 @@ class MainActivity : Activity() {
         window.statusBarColor = Kit.GROUND; window.navigationBarColor = Kit.GROUND
         content.removeAllViews()
         val screen = Screen(this, "Officina", "Cerniera studio")
+        // The pill says what is really the matter: the hourly limit is not being offline
+        val limited = GitHub.limited
         screen.status.set(when {
             loading -> "Reading"
+            limited -> "Limit until " + java.text.SimpleDateFormat("HH:mm", java.util.Locale.UK).format(java.util.Date(GitHub.limitedUntil))
             error != null -> "Offline"
             else -> "${shown().size} apps"
-        }, if (error != null) Kit.WARN else Kit.MUTED)
+        }, if (limited || error != null) Kit.WARN else Kit.MUTED)
         val rack = rack()
         screen.add(rack)
-        error?.let { screen.add(text(it, 13.5f, Kit.WARN).apply { setPadding(px(4), px(10), px(4), 0) }) }
+        (error ?: if (GitHub.limited) "GitHub's hourly limit is spent, so this is the list as last read. It resets at " +
+            java.text.SimpleDateFormat("HH:mm", java.util.Locale.UK).format(java.util.Date(GitHub.limitedUntil)) + "; a token raises the limit (below)." else null)
+            ?.let { screen.add(text(it, 13.5f, Kit.WARN).apply { setPadding(px(4), px(10), px(4), 0) }) }
         workshop(screen)
 
         val panes = Panes(this, screen)
@@ -411,6 +430,24 @@ class MainActivity : Activity() {
             "Still to see on the Fold" to "Each repo can keep a FOLD_CHECKS.md: \"## Heading\" lines and \"- [ ] item\" lines. Tick items as you see them on the phone; share the report, or, with a token, save the ticks back to the file.",
         )
     }
+}
+
+/**
+ * When each app was last read in full, and the push it saw then. An app is asked about again only when
+ * it has been pushed to since, when its last run was still going, or when the push was recent enough
+ * that its build may still have been publishing (a build takes about ten minutes; 40 allows the
+ * emulator test too).
+ */
+object Read {
+    private fun of(c: android.content.Context) = c.getSharedPreferences("officina_read", android.content.Context.MODE_PRIVATE)
+    fun needed(c: android.content.Context, repo: String, pushed: Long, run: Run?): Boolean {
+        val p = of(c)
+        val sawPush = p.getLong("pushed:$repo", -1L)
+        val readAt = p.getLong("at:$repo", 0L)
+        return sawPush != pushed || (run != null && run.status != "completed") || readAt - pushed < 40 * 60_000L
+    }
+    fun done(c: android.content.Context, repo: String, pushed: Long) =
+        of(c).edit().putLong("pushed:$repo", pushed).putLong("at:$repo", System.currentTimeMillis()).apply()
 }
 
 object Prefs {
