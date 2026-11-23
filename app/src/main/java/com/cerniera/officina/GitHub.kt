@@ -196,6 +196,8 @@ object Token {
     }
 
     fun set(c: Context, token: String?) {
+        // A new token (or none) has its own hourly limit: ask GitHub again rather than wait out the old one
+        GitHub.limitedUntil = 0L
         cached = null
         if (token.isNullOrBlank()) { prefs(c).edit().clear().apply(); return }
         val cipher = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
