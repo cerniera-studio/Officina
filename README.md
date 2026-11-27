@@ -4,7 +4,7 @@
 
 ## What it does
 
-- **The rack.** Every public app repo in cerniera-studio that publishes an APK, newest build first. Each carries the lamp of its last workflow run (green passed, amber running, rosso failed), the newest build (branch builds named), what the phone has, and how many checks are still to see. A build you haven't opened carries a champagne dot. Retired apps (Ferro, Giano) are hidden unless asked for.
+- **The rack.** Every public app repo in cerniera-studio that publishes an APK, newest build first. Each carries the lamp of its last workflow run (green passed, amber running, rosso failed), the newest build (branch builds named), what the phone has, and how many checks are still to see. A build you haven't opened carries a champagne dot. Retired apps (Ferro, Giano, Curva, Ribalta, Finestra) are hidden unless asked for; archived repos are left off the rack altogether.
 - **Install.** Fetches the release's APK and hands it to Android's PackageInstaller. Android asks once before Officina may install apps; after that, updates to apps Officina installed itself go through without a prompt where Android allows it. The first update of each app installed some other way still asks. Every build of an app is signed with its repo's own key, so installs are updates and keep settings.
 - **The bench.** Each app's builds (newest, and latest on main if different), the last run, release notes, the checklist, and the emulator's screenshots from the newest build.
 - **Still to see on the Fold.** Each repo can keep a `FOLD_CHECKS.md`:

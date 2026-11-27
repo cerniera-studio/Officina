@@ -385,7 +385,7 @@ class MainActivity : Activity() {
             if (!packageManager.canRequestPackageInstalls()) row(Row(this@MainActivity, "Allow installs", "Android asks once before Officina may install apps", endValue("Open  ›", Kit.CHAMPAGNE)) { askInstalls() })
             row(Row(this@MainActivity, "GitHub token", if (Token.get(this@MainActivity) != null) "Saved, kept encrypted on the phone" else "Optional: raises the hourly limit, and lets ticks be saved to the repos",
                 endValue(if (Token.get(this@MainActivity) != null) "Change  ›" else "Add  ›", Kit.CHAMPAGNE)) { editToken() })
-            row(Row(this@MainActivity, "Show retired apps", "Ferro, Giano and Curva", Toggle(this@MainActivity, Prefs.showRetired(this@MainActivity)) { Prefs.setShowRetired(this@MainActivity, it); render() }))
+            row(Row(this@MainActivity, "Show retired apps", "Ferro, Giano, Curva, Ribalta and Finestra", Toggle(this@MainActivity, Prefs.showRetired(this@MainActivity)) { Prefs.setShowRetired(this@MainActivity, it); render() }))
         })
         screen.add(doctrineCard(NOTES), px(24))
         screen.add(text("Version " + runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrDefault("?"), 12f, Kit.MUTED).apply { setPadding(px(4), px(16), 0, px(24)) })
@@ -419,7 +419,7 @@ class MainActivity : Activity() {
         /** Repos that hold no app. */
         val NOT_APPS = setOf("kit", ".github")
         /** Apps Mechack has retired: hidden unless asked for. */
-        val RETIRED = setOf("ferro", "giano", "curva")
+        val RETIRED = setOf("ferro", "giano", "curva", "ribalta", "finestra")
 
         fun title(repo: String) = repo.split('-').joinToString(" ") { w -> w.replaceFirstChar { it.uppercase() } }
 
